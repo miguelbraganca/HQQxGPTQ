@@ -384,6 +384,7 @@ if __name__ == "__main__":
     print(f"Original: {W}")
 
     W_q, meta = quantize(W, **quant_config)
+
     #print(f"Quantized: {W_q}")
     #print(meta)
 

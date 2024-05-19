@@ -3,7 +3,10 @@ import torch
 import torch.nn as nn
 import math
 import time
+import transformers
+
 from hqq import quantize as hqq_quantize
+from hqq import dequantize as hqq_dequantize
 
 def quantize(x, scale, zero, maxq):
     if maxq < 0:
@@ -53,7 +56,6 @@ class Quantizer(nn.Module):
                     x = x.t()
         else:
             x = x.flatten().unsqueeze(0)
-
         tmp = torch.zeros(x.shape[0], device=dev)
         xmin = torch.minimum(x.min(1)[0], tmp)
         xmax = torch.maximum(x.max(1)[0], tmp)
@@ -84,7 +86,6 @@ class Quantizer(nn.Module):
                 tmp = shape[1] if len(shape) != 3 else shape[2]
             self.scale = self.scale.repeat(tmp)
             self.zero = self.zero.repeat(tmp)
-
         if weight:
             shape = [-1] + [1] * (len(shape) - 1)
             self.scale = self.scale.reshape(shape)
@@ -120,9 +121,9 @@ torch.backends.cudnn.allow_tf32 = False
 
 class GPTQ:
 
-    def __init__(self, W):
-        self.W = W
-        self.dev = W.device
+    def __init__(self, layer):
+        W = layer.weight.data.clone()
+        self.dev = self.layer.weight.device
         self.rows = W.shape[0]
         self.columns = W.shape[1]
         self.H = torch.zeros((self.columns, self.columns), device=self.dev)
@@ -147,22 +148,18 @@ class GPTQ:
         self, blocksize=128, percdamp=.01, groupsize=-1, actorder=False, static_groups=False, L=0.1
     ):
         
-        W = self.W.clone()
+        W = self.layer.weight.data.clone()
         W = W.float()
 
         hqq_quant_config = {
-            'weight_quant_params': {'nbits': 4, 'channel_wise': True, 'group_size': 64, 'optimize': True, 'round_zero': True, 'axis': 1, 'view_as_float': False},
+            'weight_quant_params': {'nbits': 4, 'channel_wise': True, 'group_size': None, 'optimize': True, 'round_zero': True, 'axis': 1, 'view_as_float': False},
             'scale_quant_params': None,
             'zero_quant_params': None}
 
         Q_hqq, meta_hqq = hqq_quantize(W, **hqq_quant_config)
 
-        print(meta_hqq["zero"])
-
-        #self.H = torch.eye(W.shape[1]).to("cuda") # DEBUG
-        self.H = torch.load("rdmHessian.pt").to("cuda")
-        #self.H = torch.eye(W.shape[1]).to("cuda")
-
+        W_hqq = hqq_dequantize(Q_hqq, meta_hqq)
+        del Q_hqq, meta_hqq
 
         tick = time.time()
 
@@ -206,7 +203,7 @@ class GPTQ:
 
             W1 = W[:, i1:i2].clone()
             Q1 = torch.zeros_like(W1)
-            Q1_hqq = Q_hqq[:, i1:i2]
+            W1_hqq = W_hqq[:, i1:i2]
 
             Err1 = torch.zeros_like(W1)
             Losses1 = torch.zeros_like(W1)
@@ -214,7 +211,8 @@ class GPTQ:
 
             for i in range(count):
                 w = W1[:, i]
-                q_hqq = Q1_hqq[:, i]
+                w_hqq = W1_hqq[:, i]
+                
                 d = Hinv1[i, i]
 
                 if groupsize != -1:
@@ -231,10 +229,12 @@ class GPTQ:
                     w.unsqueeze(1), self.quantizer.scale, self.quantizer.zero, self.quantizer.maxq
                 ).flatten()
                 Q1[:, i] = q
-                print("zero", self.quantizer.zero)
                 Losses1[:, i] = (w - q) ** 2 / d ** 2
 
-                err1 = ((w - q_hqq) * L + (w - q) * (1 - L)) / d
+                err1 = ((w - w_hqq) * L + (w - q) * (1 - L)) / d
+
+                #prev_err1 = w-q / d
+
                 W1[:, i:] -= err1.unsqueeze(1).matmul(Hinv1[i, i:].unsqueeze(0))
                 Err1[:, i] = err1
 
@@ -255,7 +255,8 @@ class GPTQ:
         if actorder:
             Q = Q[:, invperm]
 
-        self.W = Q.reshape(self.W.shape).to(self.W.dtype)
+        final = L*W_hqq + (1-L)*Q
+        self.W = final.reshape(self.W.shape).to(self.W.dtype)
 
     def free(self):
         if DEBUG:
@@ -286,7 +287,7 @@ if __name__ == "__main__":
 
     blocksize=128
     percdamp = 0.01
-    groupsize = 64
+    groupsize = -1
     act_order = False
     static_groups = False
     W = torch.load("W_0.pt")
@@ -299,8 +300,7 @@ if __name__ == "__main__":
     gptq.fasterquant(percdamp=percdamp, groupsize=groupsize, actorder=act_order, static_groups=static_groups)
 
     finalW = torch.load("resultHessian.pt")
-    print(torch.equal(gptq.W, finalW))
-
+    #print(torch.equal(gptq.W, finalW))
 
     """Original:
     # Get zero and scale for the layer:
