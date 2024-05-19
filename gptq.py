@@ -166,7 +166,7 @@ class GPTQ:
         Q_hqq, meta_hqq = hqq_quantize(W, **hqq_quant_config)
 
         W_hqq = hqq_dequantize(Q_hqq, meta_hqq)
-        del Q_hqq, meta_hqq
+        del Q_hqq
 
         H = self.H
         del self.H
