@@ -245,8 +245,9 @@ class GPTQ:
             W[:, i2:] -= Err1.matmul(Hinv[i1:i2, i2:])
 
             if DEBUG:
-                self.W[:, :i2] = Q[:, :i2]
-                self.W[:, i2:] = W[:, i2:]
+                self.layer.weight.data[:, :i2] = Q[:, :i2]
+                self.layer.weight.data[:, i2:] = W[:, i2:]
+                print(torch.sum((self.layer(self.inp1) - self.out1) ** 2))
                 print(torch.sum(Losses))
 
         torch.cuda.synchronize()
@@ -257,7 +258,7 @@ class GPTQ:
             Q = Q[:, invperm]
 
         final = L*W_hqq + (1-L)*Q
-        self.W = final.reshape(self.W.shape).to(self.W.dtype)
+        self.layer.weight.data = final.reshape(self.layer.weight.shape).to(self.layer.weight.data.dtype)
 
     def free(self):
         if DEBUG:
