@@ -122,8 +122,9 @@ torch.backends.cudnn.allow_tf32 = False
 class GPTQ:
 
     def __init__(self, layer):
-        W = layer.weight.data.clone()
+        self.layer = layer
         self.dev = self.layer.weight.device
+        W = layer.weight.data.clone()
         self.rows = W.shape[0]
         self.columns = W.shape[1]
         self.H = torch.zeros((self.columns, self.columns), device=self.dev)
