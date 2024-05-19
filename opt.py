@@ -3,7 +3,7 @@ import time
 import torch
 import torch.nn as nn
 
-from gptq import *
+from gptq_original import *
 from modelutils import *
 from quant import *
 
