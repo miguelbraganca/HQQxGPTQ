@@ -147,7 +147,7 @@ class GPTQ:
         self.H += inp.matmul(inp.t())
 
     def fasterquant(
-        self, blocksize=128, percdamp=.01, groupsize=-1, actorder=False, static_groups=False, L=1
+        self, blocksize=128, percdamp=.01, groupsize=-1, actorder=False, static_groups=False, L=0.1
     ):
         
         W = self.layer.weight.data.clone()
@@ -258,6 +258,7 @@ class GPTQ:
         if actorder:
             Q = Q[:, invperm]
 
+        self.quantizer.zero =L*meta_hqq["zero"] + (1-L)*self.quantizer.zero
         final = L*W_hqq + (1-L)*Q
         self.layer.weight.data = final.reshape(self.layer.weight.shape).to(self.layer.weight.data.dtype)
 
