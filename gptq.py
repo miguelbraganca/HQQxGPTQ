@@ -152,8 +152,13 @@ class GPTQ:
         W = self.layer.weight.data.clone()
         W = W.float()
 
+        tick = time.time()
+
+        if not self.quantizer.ready():
+            self.quantizer.find_params(W, weight=True)
+
         hqq_quant_config = {
-            'weight_quant_params': {'nbits': 4, 'channel_wise': True, 'group_size': None, 'optimize': True, 'round_zero': True, 'axis': 1, 'view_as_float': False},
+            'weight_quant_params': {'nbits': self.quantizer.bits, 'channel_wise': self.quantizer.perchannel, 'group_size': None, 'optimize': True, 'round_zero': False, 'axis': 1, 'view_as_float': False},
             'scale_quant_params': None,
             'zero_quant_params': None}
 
@@ -161,11 +166,6 @@ class GPTQ:
 
         W_hqq = hqq_dequantize(Q_hqq, meta_hqq)
         del Q_hqq, meta_hqq
-
-        tick = time.time()
-
-        if not self.quantizer.ready():
-            self.quantizer.find_params(W, weight=True)
 
         H = self.H
         del self.H
